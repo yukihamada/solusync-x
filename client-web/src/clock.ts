@@ -1,4 +1,4 @@
-import { ClockSample, ClockSyncMessage, ClockSyncResponse } from './types';
+import { ClockSample, ClockSyncMessage } from './types';
 
 export class ClockSync {
   private offset: number = 0;
@@ -44,7 +44,7 @@ export class ClockSync {
     client._send(message);
   }
 
-  handleResponse(response: ClockSyncResponse): void {
+  handleResponse(response: any): void {
     const t1 = (window as any).__lastSyncT1 || response.t1;
     const t4 = Date.now() / 1000;
     

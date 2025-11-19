@@ -1,11 +1,10 @@
 use anyhow::Result;
-use parking_lot::RwLock;
 use std::{
     collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, RwLock};
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
@@ -66,11 +65,11 @@ impl ClockManager {
     }
     
     /// Get current synchronized time
-    pub fn now(&self) -> f64 {
+    pub async fn now(&self) -> f64 {
         let local_time = crate::protocol::get_current_time();
         
         // Apply master offset if we're not the master
-        if let Some(offset) = *self.master_offset.read() {
+        if let Some(offset) = *self.master_offset.read().await {
             local_time + offset
         } else {
             local_time
@@ -84,13 +83,13 @@ impl ClockManager {
     }
     
     /// Get clock offset for a specific peer
-    pub fn get_peer_offset(&self, peer_id: &Uuid) -> Option<f64> {
-        self.peers.read().get(peer_id).map(|p| p.offset)
+    pub async fn get_peer_offset(&self, peer_id: &Uuid) -> Option<f64> {
+        self.peers.read().await.get(peer_id).map(|p| p.offset)
     }
     
     /// Get network statistics for a peer
-    pub fn get_peer_stats(&self, peer_id: &Uuid) -> Option<(f64, f64, u64)> {
-        self.peers.read().get(peer_id).map(|p| {
+    pub async fn get_peer_stats(&self, peer_id: &Uuid) -> Option<(f64, f64, u64)> {
+        self.peers.read().await.get(peer_id).map(|p| {
             (p.offset, p.rtt, p.sample_count)
         })
     }
@@ -104,7 +103,7 @@ impl ClockManager {
         loop {
             tokio::select! {
                 _ = maintenance_interval.tick() => {
-                    self.cleanup_stale_peers();
+                    self.cleanup_stale_peers().await;
                 }
                 
                 _ = self.process_samples() => {}
@@ -114,16 +113,23 @@ impl ClockManager {
     
     /// Process incoming clock samples
     async fn process_samples(&self) {
-        let mut rx = self.sample_rx.write();
-        
-        while let Some((peer_id, sample)) = rx.recv().await {
-            self.update_peer_clock(peer_id, sample);
+        loop {
+            let sample = {
+                let mut rx = self.sample_rx.write().await;
+                rx.recv().await
+            };
+            
+            if let Some((peer_id, sample)) = sample {
+                self.update_peer_clock(peer_id, sample).await;
+            } else {
+                break;
+            }
         }
     }
     
     /// Update clock state for a peer
-    fn update_peer_clock(&self, peer_id: Uuid, sample: ClockSample) {
-        let mut peers = self.peers.write();
+    async fn update_peer_clock(&self, peer_id: Uuid, sample: ClockSample) {
+        let mut peers = self.peers.write().await;
         
         let peer = peers.entry(peer_id).or_insert_with(|| {
             info!("New peer clock: {}", peer_id);
@@ -162,7 +168,7 @@ impl ClockManager {
         
         // If this is our master, update our offset
         if self.is_master_peer(&peer_id) {
-            *self.master_offset.write() = Some(filtered_offset);
+            *self.master_offset.write().await = Some(filtered_offset);
         }
     }
     
@@ -173,8 +179,8 @@ impl ClockManager {
     }
     
     /// Remove stale peer entries
-    fn cleanup_stale_peers(&self) {
-        let mut peers = self.peers.write();
+    async fn cleanup_stale_peers(&self) {
+        let mut peers = self.peers.write().await;
         let stale_threshold = Duration::from_secs(30);
         
         peers.retain(|id, peer| {

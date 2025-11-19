@@ -50,7 +50,10 @@ pub async fn play(
     State(state): State<AppState>,
     Json(req): Json<PlayRequest>,
 ) -> impl IntoResponse {
-    let start_at = req.start_at.unwrap_or_else(|| state.clock_manager.now() + 0.1);
+    let start_at = match req.start_at {
+        Some(t) => t,
+        None => state.clock_manager.now().await + 0.1,
+    };
     
     let control = crate::protocol::MediaControlMessage {
         header: MessageHeader::new(Uuid::new_v4(), 0),
@@ -81,7 +84,7 @@ pub async fn play(
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<()>::error(e.to_string())),
+            Json(ApiResponse::error(e.to_string())),
         ),
     }
 }
@@ -95,7 +98,7 @@ pub async fn pause(
         header: MessageHeader::new(Uuid::new_v4(), 0),
         action: MediaAction::Pause,
         track_id: track_id.clone(),
-        start_at: state.clock_manager.now(),
+        start_at: state.clock_manager.now().await,
         params: MediaParams {
             volume: None,
             loop_count: None,
@@ -117,7 +120,7 @@ pub async fn pause(
         ),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ApiResponse::<()>::error(e.to_string())),
+            Json(ApiResponse::error(e.to_string())),
         ),
     }
 }
@@ -140,7 +143,7 @@ pub async fn sync(
     State(state): State<AppState>,
     Json(req): Json<SyncRequest>,
 ) -> impl IntoResponse {
-    let server_time = state.clock_manager.now();
+    let server_time = state.clock_manager.now().await;
     let offset = server_time - req.client_time;
     
     (
@@ -167,7 +170,7 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     // TODO: Get real stats
     let status = StatusResponse {
         server_id: Uuid::new_v4().to_string(),
-        server_time: state.clock_manager.now(),
+        server_time: state.clock_manager.now().await,
         uptime_seconds: 0,
         connected_clients: 0,
         active_streams: 0,

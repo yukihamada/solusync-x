@@ -145,7 +145,7 @@ export class FutureAudioPlayer {
   }
 
   // Utility method for Opus decoding (requires additional library)
-  async decodeOpus(data: ArrayBuffer): Promise<AudioBuffer> {
+  async decodeOpus(_data: ArrayBuffer): Promise<AudioBuffer> {
     // This would require an Opus decoder library like libopus.js
     throw new Error('Opus decoding not implemented yet');
   }

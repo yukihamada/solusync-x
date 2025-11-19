@@ -1,6 +1,6 @@
 import { EventEmitter } from 'eventemitter3';
 import { ClockSync } from './clock';
-import { FutureAudioPlayer } from './player';
+// import { FutureAudioPlayer } from './player';
 import {
   SoluSyncConfig,
   NodeType,
@@ -9,16 +9,15 @@ import {
   HelloMessage,
   HeartbeatMessage,
   MediaControlMessage,
-  MediaAction,
   MediaControlParams,
 } from './types';
 
 export class SoluSyncClient extends EventEmitter {
-  private config: Required<SoluSyncConfig>;
+  private config: SoluSyncConfig;
   private ws?: WebSocket;
   private pc?: RTCPeerConnection;
   private clockSync: ClockSync;
-  private audioPlayer: FutureAudioPlayer;
+  // private audioPlayer: FutureAudioPlayer;
   private nodeId: string;
   private sequence: number = 0;
   private heartbeatInterval?: number;
@@ -34,15 +33,16 @@ export class SoluSyncClient extends EventEmitter {
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
       clockSyncInterval: 1000,
       futureBufferMs: 80,
+      authToken: undefined,
       ...config,
     };
     
     this.nodeId = this.generateNodeId();
     this.clockSync = new ClockSync();
-    this.audioPlayer = new FutureAudioPlayer(
-      this.clockSync,
-      this.config.futureBufferMs
-    );
+    // this.audioPlayer = new FutureAudioPlayer(
+    //   this.clockSync,
+    //   this.config.futureBufferMs || 80
+    // );
   }
 
   async connect(): Promise<void> {

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -84,7 +84,7 @@ impl MediaServer {
     }
     
     /// Create a new media stream
-    pub fn create_stream(&self, track_id: String, codec: String) -> Result<()> {
+    pub async fn create_stream(&self, track_id: String, codec: String) -> Result<()> {
         let (frame_tx, _) = broadcast::channel(1000);
         
         let stream = MediaStream {
@@ -96,7 +96,7 @@ impl MediaServer {
             frame_tx,
         };
         
-        self.streams.write().insert(track_id.clone(), stream);
+        self.streams.write().await.insert(track_id.clone(), stream);
         info!("Created media stream: {}", track_id);
         
         Ok(())
@@ -117,15 +117,15 @@ impl MediaServer {
             subscribed_tracks: Vec::new(),
         };
         
-        self.clients.write().insert(client_id, client);
+        self.clients.write().await.insert(client_id, client);
         info!("Added media client: {}", client_id);
         
         Ok(())
     }
     
     /// Update client network quality
-    pub fn update_client_quality(&self, client_id: Uuid, quality: NetworkQuality) {
-        if let Some(client) = self.clients.write().get_mut(&client_id) {
+    pub async fn update_client_quality(&self, client_id: Uuid, quality: NetworkQuality) {
+        if let Some(client) = self.clients.write().await.get_mut(&client_id) {
             client.network_quality = quality;
             client.future_buffer.update_network_quality(quality);
             
@@ -139,8 +139,8 @@ impl MediaServer {
     }
     
     /// Subscribe client to a track
-    pub fn subscribe_client(&self, client_id: Uuid, track_id: String) -> Result<()> {
-        let streams = self.streams.read();
+    pub async fn subscribe_client(&self, client_id: Uuid, track_id: String) -> Result<()> {
+        let streams = self.streams.read().await;
         let stream = streams
             .get(&track_id)
             .ok_or_else(|| anyhow::anyhow!("Track not found: {}", track_id))?;
@@ -152,10 +152,10 @@ impl MediaServer {
         let clock = self.clock_manager.clone();
         
         tokio::spawn(async move {
-            while let Ok(frame) = frame_rx.recv().await {
-                if let Some(client) = clients.read().get(&client_id) {
+            while let Ok(_frame) = frame_rx.recv().await {
+                if let Some(client) = clients.read().await.get(&client_id) {
                     // Add frame to future buffer with synchronized timestamp
-                    let network_time = clock.now();
+                    let network_time = clock.now().await;
                     let future_time = network_time + client.future_buffer.target_latency();
                     
                     // TODO: Send frame via WebRTC
@@ -167,7 +167,7 @@ impl MediaServer {
             }
         });
         
-        if let Some(client) = self.clients.write().get_mut(&client_id) {
+        if let Some(client) = self.clients.write().await.get_mut(&client_id) {
             client.subscribed_tracks.push(track_id);
         }
         
@@ -208,7 +208,7 @@ impl MediaServer {
         loop {
             tokio::select! {
                 _ = stats_interval.tick() => {
-                    self.log_stats();
+                    self.log_stats().await;
                 }
                 
                 _ = self.process_commands() => {}
@@ -218,19 +218,26 @@ impl MediaServer {
     
     /// Process incoming commands
     async fn process_commands(&self) {
-        let mut rx = self.control_rx.write();
-        
-        while let Some(cmd) = rx.recv().await {
-            if let Err(e) = self.process_control(cmd).await {
-                error!("Error processing control command: {}", e);
+        loop {
+            let cmd = {
+                let mut rx = self.control_rx.write().await;
+                rx.recv().await
+            };
+            
+            if let Some(cmd) = cmd {
+                if let Err(e) = self.process_control(cmd).await {
+                    error!("Error processing control command: {}", e);
+                }
+            } else {
+                break;
             }
         }
     }
     
     /// Log server statistics
-    fn log_stats(&self) {
-        let streams = self.streams.read();
-        let clients = self.clients.read();
+    async fn log_stats(&self) {
+        let streams = self.streams.read().await;
+        let clients = self.clients.read().await;
         
         debug!(
             "Media server stats: {} streams, {} clients",

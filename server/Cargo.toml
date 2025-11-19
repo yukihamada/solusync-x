@@ -55,9 +55,6 @@ criterion = "0.5"
 proptest = "1.4"
 fake = "2.9"
 
-[[bench]]
-name = "clock_sync"
-harness = false
 
 [profile.release]
 opt-level = 3

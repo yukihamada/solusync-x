@@ -1,7 +1,7 @@
 use anyhow::Result;
 use axum::extract::ws::{Message, WebSocket};
 use futures::{SinkExt, StreamExt};
-use parking_lot::RwLock;
+use tokio::sync::RwLock;
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -99,7 +99,7 @@ impl ControlServer {
         }
         
         // Cleanup
-        self.remove_client(&client_id);
+        self.remove_client(&client_id).await;
         tx_task.abort();
         
         Ok(())
@@ -157,7 +157,7 @@ impl ControlServer {
             capabilities: hello.capabilities,
         };
         
-        self.clients.write().insert(*client_id, client);
+        self.clients.write().await.insert(*client_id, client);
         
         // Add to media server if client supports media
         self.media_server.add_client(*client_id).await?;
@@ -211,14 +211,14 @@ impl ControlServer {
         tx: &mpsc::Sender<ProtoMessage>,
     ) -> Result<()> {
         let mut response = heartbeat.clone();
-        response.server_time = Some(self.clock_manager.now());
+        response.server_time = Some(self.clock_manager.now().await);
         tx.send(ProtoMessage::Heartbeat(response)).await?;
         Ok(())
     }
     
     /// Remove client
-    fn remove_client(&self, client_id: &Uuid) {
-        self.clients.write().remove(client_id);
+    async fn remove_client(&self, client_id: &Uuid) {
+        self.clients.write().await.remove(client_id);
         info!("Removed client: {}", client_id);
     }
     
@@ -229,7 +229,7 @@ impl ControlServer {
         code: ErrorCode,
         message: String,
     ) -> Result<()> {
-        if let Some(client) = self.clients.read().get(client_id) {
+        if let Some(client) = self.clients.read().await.get(client_id) {
             let error = ProtoMessage::Error(ErrorMessage {
                 header: MessageHeader::new(self.server_id, 0),
                 code,
@@ -245,7 +245,7 @@ impl ControlServer {
     
     /// Broadcast message to all clients
     pub async fn broadcast(&self, message: ProtoMessage) -> Result<()> {
-        let clients = self.clients.read();
+        let clients = self.clients.read().await;
         
         for (client_id, client) in clients.iter() {
             if let Err(e) = client.tx.send(message.clone()).await {
