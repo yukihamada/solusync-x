@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SOLUSync-X Demo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #0a0a0a;
+      color: #fff;
+    }
+    
+    .header {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    
+    .header h1 {
+      font-size: 3em;
+      margin: 0;
+      background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    
+    .status {
+      background: #1a1a1a;
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 20px;
+    }
+    
+    .status-item {
+      display: flex;
+      justify-content: space-between;
+      margin: 10px 0;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+    }
+    
+    .status-label {
+      opacity: 0.7;
+    }
+    
+    .status-value {
+      font-weight: bold;
+      font-family: 'Monaco', monospace;
+    }
+    
+    .connected { color: #4ecdc4; }
+    .disconnected { color: #ff6b6b; }
+    
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+    
+    button {
+      padding: 15px;
+      border: none;
+      border-radius: 8px;
+      background: #4ecdc4;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    button:hover:not(:disabled) {
+      background: #45b3aa;
+      transform: translateY(-2px);
+    }
+    
+    button:disabled {
+      background: #333;
+      color: #666;
+      cursor: not-allowed;
+    }
+    
+    .log {
+      background: #1a1a1a;
+      border-radius: 10px;
+      padding: 20px;
+      height: 200px;
+      overflow-y: auto;
+      font-family: 'Monaco', monospace;
+      font-size: 12px;
+    }
+    
+    .log-entry {
+      margin: 5px 0;
+      padding: 5px;
+      border-left: 3px solid #4ecdc4;
+      padding-left: 10px;
+    }
+    
+    .sync-indicator {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      display: inline-block;
+      margin-right: 10px;
+      animation: pulse 2s infinite;
+    }
+    
+    @keyframes pulse {
+      0% { opacity: 1; }
+      50% { opacity: 0.5; }
+      100% { opacity: 1; }
+    }
+    
+    .excellent { background: #4ecdc4; }
+    .good { background: #52d98a; }
+    .fair { background: #ffca3a; }
+    .poor { background: #ff9f1c; }
+    .critical { background: #ff6b6b; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>SOLUSync-X</h1>
+    <p>Next-Generation Synchronization Protocol</p>
+  </div>
+
+  <div class="status">
+    <div class="status-item">
+      <span class="status-label">Connection</span>
+      <span class="status-value" id="connection">Disconnected</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Server Time</span>
+      <span class="status-value" id="serverTime">--:--:--</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Clock Offset</span>
+      <span class="status-value" id="clockOffset">-- ms</span>
+    </div>
+    <div class="status-item">
+      <span class="status-label">Network Quality</span>
+      <span class="status-value">
+        <span class="sync-indicator" id="qualityIndicator"></span>
+        <span id="quality">Unknown</span>
+      </span>
+    </div>
+  </div>
+
+  <div class="controls">
+    <button id="connectBtn">Connect</button>
+    <button id="disconnectBtn" disabled>Disconnect</button>
+    <button id="playBtn" disabled>Play Test</button>
+    <button id="syncBtn" disabled>Force Sync</button>
+  </div>
+
+  <div class="log" id="log">
+    <div class="log-entry">Ready to connect...</div>
+  </div>
+
+  <script type="module">
+    // Import the client library (in production, this would be from npm)
+    // For demo, we'll simulate the client
+    
+    class DemoClient {
+      constructor() {
+        this.connected = false;
+        this.ws = null;
+        this.offset = 0;
+        this.quality = 'unknown';
+      }
+      
+      async connect() {
+        return new Promise((resolve) => {
+          this.connected = true;
+          this.offset = Math.random() * 2 - 1; // -1 to 1 ms
+          this.quality = 'good';
+          setTimeout(resolve, 500);
+        });
+      }
+      
+      disconnect() {
+        this.connected = false;
+        this.quality = 'unknown';
+      }
+      
+      getCurrentTime() {
+        return Date.now() / 1000 + this.offset / 1000;
+      }
+      
+      getClockOffset() {
+        return this.offset;
+      }
+      
+      getNetworkQuality() {
+        return this.quality;
+      }
+      
+      async play() {
+        return new Promise((resolve) => {
+          setTimeout(resolve, 100);
+        });
+      }
+    }
+    
+    const client = new DemoClient();
+    
+    // UI Elements
+    const connectionEl = document.getElementById('connection');
+    const serverTimeEl = document.getElementById('serverTime');
+    const clockOffsetEl = document.getElementById('clockOffset');
+    const qualityEl = document.getElementById('quality');
+    const qualityIndicatorEl = document.getElementById('qualityIndicator');
+    const logEl = document.getElementById('log');
+    
+    const connectBtn = document.getElementById('connectBtn');
+    const disconnectBtn = document.getElementById('disconnectBtn');
+    const playBtn = document.getElementById('playBtn');
+    const syncBtn = document.getElementById('syncBtn');
+    
+    // Logging
+    function log(message) {
+      const entry = document.createElement('div');
+      entry.className = 'log-entry';
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    
+    // Update UI
+    function updateStatus() {
+      if (client.connected) {
+        connectionEl.textContent = 'Connected';
+        connectionEl.className = 'status-value connected';
+        
+        const time = new Date(client.getCurrentTime() * 1000);
+        serverTimeEl.textContent = time.toLocaleTimeString() + '.' + 
+          String(time.getMilliseconds()).padStart(3, '0');
+        
+        clockOffsetEl.textContent = client.getClockOffset().toFixed(3) + ' ms';
+        
+        const quality = client.getNetworkQuality();
+        qualityEl.textContent = quality.charAt(0).toUpperCase() + quality.slice(1);
+        qualityIndicatorEl.className = `sync-indicator ${quality}`;
+        
+        connectBtn.disabled = true;
+        disconnectBtn.disabled = false;
+        playBtn.disabled = false;
+        syncBtn.disabled = false;
+      } else {
+        connectionEl.textContent = 'Disconnected';
+        connectionEl.className = 'status-value disconnected';
+        serverTimeEl.textContent = '--:--:--';
+        clockOffsetEl.textContent = '-- ms';
+        qualityEl.textContent = 'Unknown';
+        qualityIndicatorEl.className = 'sync-indicator';
+        
+        connectBtn.disabled = false;
+        disconnectBtn.disabled = true;
+        playBtn.disabled = true;
+        syncBtn.disabled = true;
+      }
+    }
+    
+    // Event handlers
+    connectBtn.addEventListener('click', async () => {
+      log('Connecting to SOLUSync-X server...');
+      try {
+        await client.connect();
+        log('Connected successfully!');
+        log(`Clock offset: ${client.getClockOffset().toFixed(3)}ms`);
+      } catch (error) {
+        log('Connection failed: ' + error.message);
+      }
+      updateStatus();
+    });
+    
+    disconnectBtn.addEventListener('click', () => {
+      client.disconnect();
+      log('Disconnected from server');
+      updateStatus();
+    });
+    
+    playBtn.addEventListener('click', async () => {
+      const startTime = client.getCurrentTime() + 1.0;
+      log(`Scheduling playback at ${startTime.toFixed(3)}`);
+      await client.play('test_track', startTime);
+      log('Play command sent');
+    });
+    
+    syncBtn.addEventListener('click', () => {
+      client.offset = Math.random() * 2 - 1;
+      log(`Clock resynced, new offset: ${client.getClockOffset().toFixed(3)}ms`);
+      updateStatus();
+    });
+    
+    // Update status every 100ms
+    setInterval(updateStatus, 100);
+    
+    // Initial update
+    updateStatus();
+  </script>
+</body>
+</html>
