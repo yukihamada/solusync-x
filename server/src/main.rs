@@ -1,6 +1,6 @@
 use anyhow::Result;
 use axum::{
-    extract::{ws::WebSocketUpgrade, State},
+    extract::{ws::WebSocketUpgrade, State, ConnectInfo},
     response::Response,
     routing::{get, post},
     Router,
@@ -75,6 +75,7 @@ async fn main() -> Result<()> {
         .route("/api/pause", post(control::handlers::pause))
         .route("/api/sync", post(control::handlers::sync))
         .route("/api/status", get(control::handlers::status))
+        .route("/api/clients", get(control::handlers::connected_clients))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(app_state);
@@ -85,7 +86,7 @@ async fn main() -> Result<()> {
     // Display startup information
     display_startup_info(addr);
 
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
 }
@@ -98,15 +99,17 @@ async fn health_check() -> &'static str {
 async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
 ) -> Response {
-    ws.on_upgrade(move |socket| handle_websocket(socket, state))
+    ws.on_upgrade(move |socket| handle_websocket(socket, state, addr))
 }
 
 async fn handle_websocket(
     socket: axum::extract::ws::WebSocket,
     state: AppState,
+    addr: SocketAddr,
 ) -> () {
-    if let Err(e) = state.control_server.handle_connection(socket).await {
+    if let Err(e) = state.control_server.handle_connection(socket, Some(addr)).await {
         tracing::error!("WebSocket error: {}", e);
     }
 }

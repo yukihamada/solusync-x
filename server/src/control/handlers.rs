@@ -178,3 +178,9 @@ pub async fn status(State(state): State<AppState>) -> impl IntoResponse {
     
     (StatusCode::OK, Json(ApiResponse::success(status)))
 }
+
+/// Get connected clients
+pub async fn connected_clients(State(state): State<AppState>) -> impl IntoResponse {
+    let clients = state.control_server.get_connected_clients().await;
+    (StatusCode::OK, Json(ApiResponse::success(clients)))
+}

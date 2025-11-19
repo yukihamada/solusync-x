@@ -7,6 +7,7 @@ pub use messages::*;
 
 /// Node types in the SOLUSync-X cluster
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum NodeType {
     Master,
     Replica,

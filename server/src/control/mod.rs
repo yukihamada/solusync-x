@@ -5,6 +5,7 @@ use tokio::sync::RwLock;
 use std::{
     collections::HashMap,
     sync::Arc,
+    net::SocketAddr,
 };
 use tokio::sync::mpsc;
 use tracing::{error, info, warn};
@@ -36,11 +37,14 @@ pub struct ControlServer {
 }
 
 /// Connected client information
-struct ClientConnection {
-    client_id: Uuid,
-    node_type: NodeType,
-    tx: mpsc::Sender<ProtoMessage>,
-    capabilities: Vec<String>,
+#[derive(Clone)]
+pub struct ClientConnection {
+    pub client_id: Uuid,
+    pub node_type: NodeType,
+    pub tx: mpsc::Sender<ProtoMessage>,
+    pub capabilities: Vec<String>,
+    pub remote_addr: Option<SocketAddr>,
+    pub connected_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl ControlServer {
@@ -54,12 +58,12 @@ impl ControlServer {
     }
     
     /// Handle new WebSocket connection
-    pub async fn handle_connection(&self, websocket: WebSocket) -> Result<()> {
+    pub async fn handle_connection(&self, websocket: WebSocket, remote_addr: Option<SocketAddr>) -> Result<()> {
         let (mut ws_sender, mut ws_receiver) = websocket.split();
         let (tx, mut rx) = mpsc::channel::<ProtoMessage>(100);
         
         let client_id = Uuid::new_v4();
-        info!("New WebSocket connection: {}", client_id);
+        info!("New WebSocket connection from {:?}: {}", remote_addr, client_id);
         
         // Spawn task to forward messages to WebSocket
         let tx_task = tokio::spawn(async move {
@@ -82,7 +86,7 @@ impl ControlServer {
         while let Some(result) = ws_receiver.next().await {
             match result {
                 Ok(Message::Text(text)) => {
-                    if let Err(e) = self.handle_message(&client_id, &text, &tx).await {
+                    if let Err(e) = self.handle_message(&client_id, &text, &tx, remote_addr).await {
                         error!("Error handling message from {}: {}", client_id, e);
                     }
                 }
@@ -111,12 +115,13 @@ impl ControlServer {
         client_id: &Uuid,
         text: &str,
         tx: &mpsc::Sender<ProtoMessage>,
+        remote_addr: Option<SocketAddr>,
     ) -> Result<()> {
         let message: ProtoMessage = serde_json::from_str(text)?;
         
         match message {
             ProtoMessage::Hello(hello) => {
-                self.handle_hello(client_id, hello, tx.clone()).await?;
+                self.handle_hello(client_id, hello, tx.clone(), remote_addr).await?;
             }
             ProtoMessage::ClockSync(sync) => {
                 self.handle_clock_sync(client_id, sync, tx).await?;
@@ -141,10 +146,11 @@ impl ControlServer {
         client_id: &Uuid,
         hello: HelloMessage,
         tx: mpsc::Sender<ProtoMessage>,
+        remote_addr: Option<SocketAddr>,
     ) -> Result<()> {
         info!(
-            "Client {} hello: type={:?}, capabilities={:?}",
-            client_id, hello.node_type, hello.capabilities
+            "Client {} hello from {:?}: type={:?}, capabilities={:?}",
+            client_id, remote_addr, hello.node_type, hello.capabilities
         );
         
         // TODO: Authenticate client
@@ -155,6 +161,8 @@ impl ControlServer {
             node_type: hello.node_type,
             tx: tx.clone(),
             capabilities: hello.capabilities,
+            remote_addr,
+            connected_at: chrono::Utc::now(),
         };
         
         self.clients.write().await.insert(*client_id, client);
@@ -255,4 +263,26 @@ impl ControlServer {
         
         Ok(())
     }
+    
+    /// Get connected clients information
+    pub async fn get_connected_clients(&self) -> Vec<ClientInfo> {
+        let clients = self.clients.read().await;
+        
+        clients.values().map(|client| ClientInfo {
+            client_id: client.client_id,
+            node_type: client.node_type,
+            capabilities: client.capabilities.clone(),
+            remote_addr: client.remote_addr.map(|addr| addr.to_string()),
+            connected_at: client.connected_at,
+        }).collect()
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+pub struct ClientInfo {
+    pub client_id: Uuid,
+    pub node_type: NodeType,
+    pub capabilities: Vec<String>,
+    pub remote_addr: Option<String>,
+    pub connected_at: chrono::DateTime<chrono::Utc>,
 }

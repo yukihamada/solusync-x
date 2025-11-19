@@ -267,6 +267,7 @@
         <button id="disconnectBtn" class="btn-secondary" disabled>Disconnect</button>
         <button id="playBtn" class="btn-secondary" disabled>Test Play</button>
         <button id="syncBtn" class="btn-secondary" disabled>Force Sync</button>
+        <button id="clientsBtn" class="btn-secondary">Show Clients</button>
       </div>
       
       <div class="log" id="log"></div>
@@ -565,6 +566,25 @@
     document.getElementById('syncBtn').addEventListener('click', () => {
       client.sendClockSync();
       client.log('Manual sync triggered');
+    });
+    
+    document.getElementById('clientsBtn').addEventListener('click', async () => {
+      try {
+        const response = await fetch('/api/clients');
+        const result = await response.json();
+        
+        if (result.success && result.data) {
+          client.log('Connected clients: ' + result.data.length);
+          result.data.forEach(cl => {
+            const connectedAt = new Date(cl.connected_at).toLocaleTimeString();
+            client.log(`- ${cl.client_id} (${cl.node_type}) from ${cl.remote_addr || 'unknown'} at ${connectedAt}`);
+          });
+        } else {
+          client.log('Failed to get client list');
+        }
+      } catch (error) {
+        client.log('Error fetching client list: ' + error.message);
+      }
     });
     
     // Initial UI state
