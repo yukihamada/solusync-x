@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SOLUSync-X Test Demo</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #0a0a0a;
+      color: #fff;
+    }
+    
+    .container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    
+    .panel {
+      background: #1a1a1a;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+      background: linear-gradient(45deg, #ff6b6b, #4ecdc4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      font-size: 3em;
+    }
+    
+    .status-grid {
+      display: grid;
+      gap: 10px;
+    }
+    
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px;
+      background: #2a2a2a;
+      border-radius: 5px;
+    }
+    
+    .value {
+      font-family: monospace;
+      color: #4ecdc4;
+    }
+    
+    button {
+      width: 100%;
+      padding: 15px;
+      margin: 5px 0;
+      border: none;
+      border-radius: 8px;
+      background: #4ecdc4;
+      color: #000;
+      font-weight: bold;
+      cursor: pointer;
+      transition: all 0.3s;
+    }
+    
+    button:hover:not(:disabled) {
+      background: #45b3aa;
+      transform: translateY(-2px);
+    }
+    
+    button:disabled {
+      background: #333;
+      color: #666;
+      cursor: not-allowed;
+    }
+    
+    .log {
+      background: #0a0a0a;
+      border: 1px solid #333;
+      border-radius: 5px;
+      padding: 10px;
+      height: 300px;
+      overflow-y: auto;
+      font-family: monospace;
+      font-size: 12px;
+    }
+    
+    .log-entry {
+      margin: 2px 0;
+      padding: 2px;
+    }
+    
+    .log-info { color: #4ecdc4; }
+    .log-error { color: #ff6b6b; }
+    .log-success { color: #52d98a; }
+    .log-warn { color: #ffca3a; }
+    
+    .sync-visual {
+      margin: 20px 0;
+      text-align: center;
+    }
+    
+    .sync-circle {
+      display: inline-block;
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      background: #4ecdc4;
+      transition: all 0.3s;
+    }
+    
+    .sync-circle.syncing {
+      animation: pulse 1s infinite;
+    }
+    
+    @keyframes pulse {
+      0% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.1); opacity: 0.7; }
+      100% { transform: scale(1); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+  <h1>SOLUSync-X Test Demo</h1>
+  
+  <div class="container">
+    <div class="panel">
+      <h2>接続状態</h2>
+      <div class="status-grid">
+        <div class="status-row">
+          <span>Connection</span>
+          <span class="value" id="connection">Disconnected</span>
+        </div>
+        <div class="status-row">
+          <span>Server URL</span>
+          <span class="value">ws://localhost:8080/ws</span>
+        </div>
+        <div class="status-row">
+          <span>Local Time</span>
+          <span class="value" id="localTime">--:--:--</span>
+        </div>
+        <div class="status-row">
+          <span>Server Time</span>
+          <span class="value" id="serverTime">--:--:--</span>
+        </div>
+        <div class="status-row">
+          <span>Clock Offset</span>
+          <span class="value" id="clockOffset">-- ms</span>
+        </div>
+        <div class="status-row">
+          <span>Round Trip Time</span>
+          <span class="value" id="rtt">-- ms</span>
+        </div>
+        <div class="status-row">
+          <span>Network Quality</span>
+          <span class="value" id="quality">Unknown</span>
+        </div>
+      </div>
+      
+      <div class="sync-visual">
+        <div class="sync-circle" id="syncCircle"></div>
+      </div>
+    </div>
+    
+    <div class="panel">
+      <h2>コントロール</h2>
+      <button id="connectBtn">Connect to Server</button>
+      <button id="disconnectBtn" disabled>Disconnect</button>
+      <button id="syncBtn" disabled>Manual Clock Sync</button>
+      <button id="playBtn" disabled>Play Test Sound</button>
+      <button id="pauseBtn" disabled>Pause</button>
+      <button id="clearBtn">Clear Log</button>
+      
+      <h3>ログ</h3>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    // UUID v4 generator
+    function generateUUID() {
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0;
+        const v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+    }
+    
+    // Simple WebSocket client implementation
+    class TestClient {
+      constructor() {
+        this.ws = null;
+        this.connected = false;
+        this.nodeId = generateUUID();
+        this.sequence = 0;
+        this.clockOffset = 0;
+        this.lastRtt = 0;
+        this.syncInterval = null;
+      }
+      
+      connect() {
+        return new Promise((resolve, reject) => {
+          try {
+            this.ws = new WebSocket('ws://localhost:8080/ws');
+            
+            this.ws.onopen = () => {
+              this.connected = true;
+              this.sendHello();
+              this.startClockSync();
+              log('Connected to server', 'success');
+              resolve();
+            };
+            
+            this.ws.onmessage = (event) => {
+              this.handleMessage(event.data);
+            };
+            
+            this.ws.onerror = (error) => {
+              log('WebSocket error: ' + error, 'error');
+              reject(error);
+            };
+            
+            this.ws.onclose = () => {
+              this.connected = false;
+              this.stopClockSync();
+              log('Disconnected from server', 'warn');
+              updateUI();
+            };
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+      
+      disconnect() {
+        if (this.ws) {
+          this.ws.close();
+          this.ws = null;
+        }
+      }
+      
+      sendHello() {
+        const message = {
+          type: 'hello',
+          header: this.createHeader(),
+          protocol_version: '0.1.0',
+          capabilities: ['audio', 'clock_sync'],
+          node_type: 'client'
+        };
+        this.send(message);
+      }
+      
+      handleMessage(data) {
+        try {
+          const message = JSON.parse(data);
+          log(`Received: ${message.type}`, 'info');
+          
+          switch (message.type) {
+            case 'hello':
+              log('Server hello received', 'success');
+              updateUI();
+              break;
+              
+            case 'clock_sync_response':
+              this.handleClockSync(message);
+              break;
+              
+            case 'error':
+              log(`Error: ${message.message}`, 'error');
+              break;
+          }
+        } catch (error) {
+          log('Failed to parse message: ' + error, 'error');
+        }
+      }
+      
+      startClockSync() {
+        this.syncInterval = setInterval(() => {
+          this.sendClockSync();
+        }, 1000);
+        // Initial sync
+        this.sendClockSync();
+      }
+      
+      stopClockSync() {
+        if (this.syncInterval) {
+          clearInterval(this.syncInterval);
+          this.syncInterval = null;
+        }
+      }
+      
+      sendClockSync() {
+        const t1 = Date.now() / 1000;
+        const message = {
+          type: 'clock_sync',
+          header: this.createHeader(),
+          t1: t1
+        };
+        this.t1 = t1;
+        this.send(message);
+      }
+      
+      handleClockSync(response) {
+        const t4 = Date.now() / 1000;
+        const t1 = this.t1;
+        const t2 = response.t2;
+        const t3 = response.t3;
+        
+        // Calculate RTT and offset
+        this.lastRtt = ((t4 - t1) - (t3 - t2)) * 1000;
+        this.clockOffset = ((t2 - t1) + (t3 - t4)) / 2 * 1000;
+        
+        log(`Clock sync: offset=${this.clockOffset.toFixed(3)}ms, RTT=${this.lastRtt.toFixed(3)}ms`);
+        updateUI();
+      }
+      
+      play(trackId) {
+        const message = {
+          type: 'media_control',
+          header: this.createHeader(),
+          action: 'play',
+          track_id: trackId,
+          start_at: this.getServerTime() + 1.0,
+          params: {
+            volume: 0.8
+          }
+        };
+        this.send(message);
+        log(`Sent play command for ${trackId}`, 'success');
+      }
+      
+      pause(trackId) {
+        const message = {
+          type: 'media_control',
+          header: this.createHeader(),
+          action: 'pause',
+          track_id: trackId,
+          start_at: this.getServerTime(),
+          params: {}
+        };
+        this.send(message);
+        log(`Sent pause command for ${trackId}`, 'success');
+      }
+      
+      send(message) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+          this.ws.send(JSON.stringify(message));
+        }
+      }
+      
+      createHeader() {
+        return {
+          id: generateUUID(),
+          timestamp: Date.now() / 1000,
+          node_id: this.nodeId,
+          sequence: this.sequence++
+        };
+      }
+      
+      getLocalTime() {
+        return Date.now() / 1000;
+      }
+      
+      getServerTime() {
+        return this.getLocalTime() + this.clockOffset / 1000;
+      }
+      
+      getNetworkQuality() {
+        if (this.lastRtt < 10) return 'Excellent';
+        if (this.lastRtt < 50) return 'Good';
+        if (this.lastRtt < 100) return 'Fair';
+        if (this.lastRtt < 200) return 'Poor';
+        return 'Critical';
+      }
+    }
+    
+    // Create client instance
+    const client = new TestClient();
+    
+    // UI Elements
+    const connectionEl = document.getElementById('connection');
+    const localTimeEl = document.getElementById('localTime');
+    const serverTimeEl = document.getElementById('serverTime');
+    const clockOffsetEl = document.getElementById('clockOffset');
+    const rttEl = document.getElementById('rtt');
+    const qualityEl = document.getElementById('quality');
+    const syncCircleEl = document.getElementById('syncCircle');
+    const logEl = document.getElementById('log');
+    
+    // Logging
+    function log(message, type = 'info') {
+      const entry = document.createElement('div');
+      entry.className = `log-entry log-${type}`;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    
+    // Update UI
+    function updateUI() {
+      if (client.connected) {
+        connectionEl.textContent = 'Connected';
+        connectionEl.style.color = '#52d98a';
+        syncCircleEl.classList.add('syncing');
+        
+        clockOffsetEl.textContent = client.clockOffset.toFixed(3) + ' ms';
+        rttEl.textContent = client.lastRtt.toFixed(3) + ' ms';
+        qualityEl.textContent = client.getNetworkQuality();
+        
+        // Update buttons
+        document.getElementById('connectBtn').disabled = true;
+        document.getElementById('disconnectBtn').disabled = false;
+        document.getElementById('syncBtn').disabled = false;
+        document.getElementById('playBtn').disabled = false;
+        document.getElementById('pauseBtn').disabled = false;
+      } else {
+        connectionEl.textContent = 'Disconnected';
+        connectionEl.style.color = '#ff6b6b';
+        syncCircleEl.classList.remove('syncing');
+        
+        clockOffsetEl.textContent = '-- ms';
+        rttEl.textContent = '-- ms';
+        qualityEl.textContent = 'Unknown';
+        
+        // Update buttons
+        document.getElementById('connectBtn').disabled = false;
+        document.getElementById('disconnectBtn').disabled = true;
+        document.getElementById('syncBtn').disabled = true;
+        document.getElementById('playBtn').disabled = true;
+        document.getElementById('pauseBtn').disabled = true;
+      }
+    }
+    
+    // Update time displays
+    setInterval(() => {
+      if (client.connected) {
+        const local = new Date(client.getLocalTime() * 1000);
+        const server = new Date(client.getServerTime() * 1000);
+        
+        localTimeEl.textContent = local.toLocaleTimeString() + '.' + 
+          String(local.getMilliseconds()).padStart(3, '0');
+        serverTimeEl.textContent = server.toLocaleTimeString() + '.' + 
+          String(server.getMilliseconds()).padStart(3, '0');
+      } else {
+        localTimeEl.textContent = '--:--:--';
+        serverTimeEl.textContent = '--:--:--';
+      }
+    }, 100);
+    
+    // Event handlers
+    document.getElementById('connectBtn').addEventListener('click', async () => {
+      try {
+        await client.connect();
+        updateUI();
+      } catch (error) {
+        log('Failed to connect: ' + error, 'error');
+      }
+    });
+    
+    document.getElementById('disconnectBtn').addEventListener('click', () => {
+      client.disconnect();
+      updateUI();
+    });
+    
+    document.getElementById('syncBtn').addEventListener('click', () => {
+      client.sendClockSync();
+      log('Manual clock sync initiated', 'info');
+    });
+    
+    document.getElementById('playBtn').addEventListener('click', () => {
+      client.play('test_track_001');
+    });
+    
+    document.getElementById('pauseBtn').addEventListener('click', () => {
+      client.pause('test_track_001');
+    });
+    
+    document.getElementById('clearBtn').addEventListener('click', () => {
+      logEl.innerHTML = '';
+      log('Log cleared', 'info');
+    });
+    
+    // Initial state
+    updateUI();
+    log('Test client ready', 'info');
+  </script>
+</body>
+</html>
